@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hyper Babel — リアルタイム音声翻訳</title>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --surface2: #1a1a26;
+      --border: #2a2a3e;
+      --accent: #6c63ff;
+      --accent2: #ff6584;
+      --accent3: #43e97b;
+      --text: #e8e8f0;
+      --text-dim: #7a7a9a;
+      --recording: #ff4757;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', 'Noto Sans JP', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      background: var(--surface);
+    }
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    /* ── Main layout ── */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+      padding: 1.5rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* ── Control panel ── */
+    .controls {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      align-items: flex-end;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .control-group label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+    }
+
+    select {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+      outline: none;
+      min-width: 160px;
+    }
+    select:focus { border-color: var(--accent); }
+
+    /* Language checkboxes */
+    .lang-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .lang-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.3rem 0.7rem;
+      cursor: pointer;
+      font-size: 0.82rem;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .lang-chip:hover { border-color: var(--accent); }
+    .lang-chip input { display: none; }
+    .lang-chip.checked {
+      background: rgba(108, 99, 255, 0.15);
+      border-color: var(--accent);
+      color: #a09aff;
+    }
+    .lang-flag { font-size: 1.1rem; }
+
+    /* Record button */
+    .record-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.7rem 1.5rem;
+      border-radius: 50px;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-width: 160px;
+      justify-content: center;
+    }
+    .record-btn.idle {
+      background: linear-gradient(135deg, var(--accent), #9c85ff);
+      color: #fff;
+    }
+    .record-btn.idle:hover { transform: scale(1.03); box-shadow: 0 4px 20px rgba(108,99,255,0.4); }
+    .record-btn.recording {
+      background: var(--recording);
+      color: #fff;
+      animation: pulse-btn 1.5s infinite;
+    }
+    @keyframes pulse-btn {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,71,87,0.4); }
+      50% { box-shadow: 0 0 0 10px rgba(255,71,87,0); }
+    }
+
+    .mic-icon { font-size: 1.1rem; }
+    .dot {
+      width: 8px; height: 8px;
+      background: #fff;
+      border-radius: 50%;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── Content area ── */
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 1.5rem;
+      min-height: 0;
+    }
+
+    @media (max-width: 900px) {
+      .content { grid-template-columns: 1fr; }
+    }
+
+    /* ── Transcript panel ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .panel-header .indicator {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--text-dim);
+    }
+    .panel-header .indicator.active { background: var(--accent3); }
+
+    .transcript-body {
+      flex: 1;
+      padding: 1.25rem;
+      overflow-y: auto;
+      min-height: 200px;
+    }
+
+    .transcript-entry {
+      margin-bottom: 1.25rem;
+    }
+    .transcript-entry .interim {
+      color: var(--text-dim);
+      font-style: italic;
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+    .transcript-entry .final {
+      color: var(--text);
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+    .transcript-entry .timestamp {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 0.25rem;
+    }
+
+    .empty-state {
+      color: var(--text-dim);
+      text-align: center;
+      padding: 3rem 1rem;
+      font-size: 0.9rem;
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+
+    /* ── Translation grid ── */
+    .translation-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+      padding: 1.25rem;
+      overflow-y: auto;
+      align-content: start;
+    }
+
+    .translation-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      transition: border-color 0.2s;
+    }
+    .translation-card.updating {
+      border-color: var(--accent);
+      animation: card-glow 0.5s ease-out;
+    }
+    @keyframes card-glow {
+      0% { box-shadow: 0 0 0 2px rgba(108,99,255,0.4); }
+      100% { box-shadow: none; }
+    }
+
+    .card-lang {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-dim);
+      margin-bottom: 0.6rem;
+    }
+    .card-flag { font-size: 1rem; }
+    .card-text {
+      font-size: 1rem;
+      line-height: 1.6;
+      color: var(--text);
+      min-height: 2em;
+    }
+    .card-text.loading {
+      color: var(--text-dim);
+    }
+    .card-text.loading::after {
+      content: '';
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      margin-left: 4px;
+      animation: blink 0.7s infinite;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      padding: 0.6rem 1.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: var(--surface);
+    }
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      flex-shrink: 0;
+    }
+    .status-dot.ok { background: var(--accent3); }
+    .status-dot.error { background: var(--recording); }
+    .status-dot.busy { background: var(--accent); animation: blink 1s infinite; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── History toggle ── */
+    .history-list { display: flex; flex-direction: column; gap: 0; }
+    .history-item {
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.25rem;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .history-item:hover { background: var(--surface2); }
+    .history-item.active { background: rgba(108,99,255,0.1); }
+    .history-item-text {
+      font-size: 0.88rem;
+      line-height: 1.4;
+      margin-bottom: 0.25rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .history-item-meta {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+
+    /* ── No Speech API warning ── */
+    .api-warning {
+      background: rgba(255, 71, 87, 0.1);
+      border: 1px solid var(--recording);
+      color: #ff6b7a;
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">⚡ Hyper Babel</div>
+    <div class="subtitle">リアルタイム音声翻訳 / Real-time Voice Translation</div>
+  </div>
+</header>
+
+<main>
+  <!-- Controls -->
+  <div class="controls" id="controls">
+    <!-- Source language -->
+    <div class="control-group">
+      <label>話す言語 / Source Language</label>
+      <select id="sourceLang">
+        <option value="ja">🇯🇵 日本語</option>
+        <option value="en">🇺🇸 English</option>
+        <option value="ar">🇸🇦 العربية</option>
+        <option value="hi">🇮🇳 हिंदी</option>
+        <option value="pt">🇧🇷 Português</option>
+        <option value="zh">🇨🇳 中文</option>
+        <option value="fr">🇫🇷 Français</option>
+        <option value="it">🇮🇹 Italiano</option>
+        <option value="ko">🇰🇷 한국어</option>
+      </select>
+    </div>
+
+    <!-- Target languages -->
+    <div class="control-group">
+      <label>翻訳先 / Translate Into</label>
+      <div class="lang-grid" id="targetLangs">
+        <label class="lang-chip checked" data-lang="en">
+          <input type="checkbox" value="en" checked>
+          <span class="lang-flag">🇺🇸</span> English
+        </label>
+        <label class="lang-chip checked" data-lang="zh">
+          <input type="checkbox" value="zh" checked>
+          <span class="lang-flag">🇨🇳</span> 中文
+        </label>
+        <label class="lang-chip checked" data-lang="ko">
+          <input type="checkbox" value="ko" checked>
+          <span class="lang-flag">🇰🇷</span> 한국어
+        </label>
+        <label class="lang-chip" data-lang="ar">
+          <input type="checkbox" value="ar">
+          <span class="lang-flag">🇸🇦</span> العربية
+        </label>
+        <label class="lang-chip" data-lang="hi">
+          <input type="checkbox" value="hi">
+          <span class="lang-flag">🇮🇳</span> हिंदी
+        </label>
+        <label class="lang-chip" data-lang="pt">
+          <input type="checkbox" value="pt">
+          <span class="lang-flag">🇧🇷</span> Português
+        </label>
+        <label class="lang-chip" data-lang="fr">
+          <input type="checkbox" value="fr">
+          <span class="lang-flag">🇫🇷</span> Français
+        </label>
+        <label class="lang-chip" data-lang="it">
+          <input type="checkbox" value="it">
+          <span class="lang-flag">🇮🇹</span> Italiano
+        </label>
+        <label class="lang-chip" data-lang="ja">
+          <input type="checkbox" value="ja">
+          <span class="lang-flag">🇯🇵</span> 日本語
+        </label>
+      </div>
+    </div>
+
+    <!-- Record button -->
+    <div class="control-group" style="margin-left:auto">
+      <label>&nbsp;</label>
+      <button class="record-btn idle" id="recordBtn" onclick="toggleRecording()">
+        <span class="mic-icon">🎙️</span>
+        <span id="recordBtnText">録音開始</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- No Speech API warning (shown if needed) -->
+  <div class="api-warning" id="noSpeechWarning" style="display:none">
+    ⚠️ お使いのブラウザは Web Speech API に対応していません。<br>
+    Google Chrome または Microsoft Edge をお使いください。
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+    <!-- Left: transcript -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="indicator" id="transcriptIndicator"></div>
+        認識テキスト / Transcript
+      </div>
+      <div class="transcript-body" id="transcriptBody">
+        <div class="empty-state" id="emptyTranscript">
+          <div class="icon">🎤</div>
+          マイクボタンを押してスピーチを開始してください
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: translations -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="indicator" id="transIndicator"></div>
+        翻訳 / Translations
+      </div>
+      <div class="translation-grid" id="translationGrid">
+        <!-- Cards injected by JS -->
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="status-bar">
+  <div class="status-dot" id="statusDot"></div>
+  <span id="statusText">準備完了 / Ready</span>
+</div>
+
+<script>
+// ── Language metadata ──────────────────────────────────────────
+const LANGUAGES = {
+  ja: { name: '日本語',  flag: '🇯🇵', speechCode: 'ja-JP' },
+  en: { name: 'English', flag: '🇺🇸', speechCode: 'en-US' },
+  ar: { name: 'العربية', flag: '🇸🇦', speechCode: 'ar-SA' },
+  hi: { name: 'हिंदी',  flag: '🇮🇳', speechCode: 'hi-IN' },
+  pt: { name: 'Português', flag: '🇧🇷', speechCode: 'pt-BR' },
+  zh: { name: '中文',   flag: '🇨🇳', speechCode: 'zh-CN' },
+  fr: { name: 'Français', flag: '🇫🇷', speechCode: 'fr-FR' },
+  it: { name: 'Italiano', flag: '🇮🇹', speechCode: 'it-IT' },
+  ko: { name: '한국어', flag: '🇰🇷', speechCode: 'ko-KR' },
+};
+
+// ── State ─────────────────────────────────────────────────────
+let recognition = null;
+let isRecording = false;
+let interimDiv = null;
+let translationQueue = [];
+let isTranslating = false;
+let currentSourceLang = 'ja';
+let currentTranslations = {};  // lang -> card element
+
+// ── DOM helpers ───────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+
+function setStatus(text, state = 'idle') {
+  $('statusText').textContent = text;
+  const dot = $('statusDot');
+  dot.className = 'status-dot' + (state !== 'idle' ? ' ' + state : '');
+}
+
+function updateTranslationCards() {
+  const grid = $('translationGrid');
+  const targetLangs = getTargetLangs();
+  const sourceLang = $('sourceLang').value;
+
+  // Remove cards for deselected langs
+  Object.keys(currentTranslations).forEach(lang => {
+    if (!targetLangs.includes(lang) || lang === sourceLang) {
+      currentTranslations[lang]?.remove();
+      delete currentTranslations[lang];
+    }
+  });
+
+  // Add cards for new langs
+  targetLangs.forEach(lang => {
+    if (lang !== sourceLang && !currentTranslations[lang]) {
+      const card = document.createElement('div');
+      card.className = 'translation-card';
+      card.id = `card-${lang}`;
+      card.innerHTML = `
+        <div class="card-lang">
+          <span class="card-flag">${LANGUAGES[lang].flag}</span>
+          ${LANGUAGES[lang].name}
+        </div>
+        <div class="card-text" id="cardtext-${lang}">—</div>
+      `;
+      grid.appendChild(card);
+      currentTranslations[lang] = card;
+    }
+  });
+
+  // Update source lang chip visibility
+  document.querySelectorAll('#targetLangs .lang-chip').forEach(chip => {
+    const lang = chip.dataset.lang;
+    chip.style.opacity = lang === sourceLang ? '0.4' : '1';
+    chip.style.pointerEvents = lang === sourceLang ? 'none' : '';
+  });
+}
+
+function getTargetLangs() {
+  return Array.from(
+    document.querySelectorAll('#targetLangs input[type=checkbox]:checked')
+  ).map(cb => cb.value);
+}
+
+// ── Lang chip toggle ──────────────────────────────────────────
+document.querySelectorAll('#targetLangs .lang-chip').forEach(chip => {
+  chip.addEventListener('click', (e) => {
+    e.preventDefault();
+    const cb = chip.querySelector('input');
+    cb.checked = !cb.checked;
+    chip.classList.toggle('checked', cb.checked);
+    updateTranslationCards();
+  });
+});
+
+$('sourceLang').addEventListener('change', () => {
+  currentSourceLang = $('sourceLang').value;
+  if (recognition) {
+    const wasRecording = isRecording;
+    if (wasRecording) stopRecording();
+    recognition.lang = LANGUAGES[currentSourceLang].speechCode;
+    if (wasRecording) startRecording();
+  }
+  updateTranslationCards();
+  // Uncheck source lang from targets
+  const sourceChip = document.querySelector(`#targetLangs .lang-chip[data-lang="${currentSourceLang}"]`);
+  if (sourceChip) {
+    sourceChip.querySelector('input').checked = false;
+    sourceChip.classList.remove('checked');
+  }
+});
+
+// ── Speech Recognition setup ──────────────────────────────────
+function initSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    $('noSpeechWarning').style.display = 'block';
+    $('recordBtn').disabled = true;
+    $('recordBtn').style.opacity = '0.5';
+    return false;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = LANGUAGES[$('sourceLang').value].speechCode;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    setStatus('録音中... / Recording...', 'busy');
+    $('transcriptIndicator').classList.add('active');
+  };
+
+  recognition.onresult = (e) => {
+    let interim = '';
+    let final = '';
+
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        final += transcript;
+      } else {
+        interim += transcript;
+      }
+    }
+
+    updateInterim(interim);
+
+    if (final.trim()) {
+      commitFinal(final.trim());
+    }
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    if (e.error === 'aborted') return;
+    console.error('Speech error:', e.error);
+    setStatus(`エラー: ${e.error}`, 'error');
+  };
+
+  recognition.onend = () => {
+    $('transcriptIndicator').classList.remove('active');
+    if (isRecording) {
+      // Auto-restart
+      try { recognition.start(); } catch {}
+    } else {
+      setStatus('停止 / Stopped');
+      updateBtn(false);
+    }
+  };
+
+  return true;
+}
+
+function updateInterim(text) {
+  const body = $('transcriptBody');
+  $('emptyTranscript').style.display = 'none';
+
+  if (!interimDiv) {
+    interimDiv = document.createElement('div');
+    interimDiv.className = 'transcript-entry';
+    body.appendChild(interimDiv);
+  }
+  interimDiv.innerHTML = `<div class="interim">${escapeHtml(text)}</div>`;
+  body.scrollTop = body.scrollHeight;
+}
+
+function commitFinal(text) {
+  const body = $('transcriptBody');
+  const now = new Date().toLocaleTimeString('ja-JP');
+
+  if (interimDiv) {
+    interimDiv.remove();
+    interimDiv = null;
+  }
+
+  const entry = document.createElement('div');
+  entry.className = 'transcript-entry';
+  entry.innerHTML = `
+    <div class="final">${escapeHtml(text)}</div>
+    <div class="timestamp">${now}</div>
+  `;
+  body.appendChild(entry);
+  body.scrollTop = body.scrollHeight;
+
+  // Queue translation
+  enqueueTranslation(text);
+}
+
+// ── Translation queue ─────────────────────────────────────────
+function enqueueTranslation(text) {
+  translationQueue.push(text);
+  processQueue();
+}
+
+async function processQueue() {
+  if (isTranslating || translationQueue.length === 0) return;
+
+  isTranslating = true;
+  const text = translationQueue.shift();
+  await translateText(text);
+  isTranslating = false;
+  processQueue();
+}
+
+async function translateText(text) {
+  const sourceLang = $('sourceLang').value;
+  const targetLangs = getTargetLangs().filter(l => l !== sourceLang);
+
+  if (targetLangs.length === 0) return;
+
+  // Set all cards to loading
+  targetLangs.forEach(lang => {
+    const el = $(`cardtext-${lang}`);
+    if (el) {
+      el.textContent = '';
+      el.className = 'card-text loading';
+    }
+    currentTranslations[lang]?.classList.add('updating');
+  });
+
+  setStatus('翻訳中... / Translating...', 'busy');
+  $('transIndicator').classList.add('active');
+
+  try {
+    const response = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, sourceLang, targetLangs }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Translation failed');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const received = new Set();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      let eventType = null;
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ') && eventType) {
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (eventType === 'translation') {
+              const { lang, text: translated } = data;
+              if (!received.has(lang)) {
+                received.add(lang);
+                const el = $(`cardtext-${lang}`);
+                if (el) {
+                  el.textContent = translated;
+                  el.className = 'card-text';
+                }
+                currentTranslations[lang]?.classList.remove('updating');
+              }
+            } else if (eventType === 'final') {
+              // Apply any missing translations
+              const { translations } = data;
+              Object.entries(translations).forEach(([lang, translated]) => {
+                if (!received.has(lang)) {
+                  const el = $(`cardtext-${lang}`);
+                  if (el) {
+                    el.textContent = translated;
+                    el.className = 'card-text';
+                  }
+                  currentTranslations[lang]?.classList.remove('updating');
+                }
+              });
+            } else if (eventType === 'error') {
+              setStatus(`翻訳エラー: ${data.message}`, 'error');
+              targetLangs.forEach(lang => {
+                const el = $(`cardtext-${lang}`);
+                if (el) {
+                  el.textContent = 'エラー / Error';
+                  el.className = 'card-text';
+                }
+              });
+            }
+          } catch {}
+          eventType = null;
+        }
+      }
+    }
+
+    // Clear any remaining loading states
+    targetLangs.forEach(lang => {
+      const el = $(`cardtext-${lang}`);
+      if (el && el.classList.contains('loading')) {
+        el.textContent = '—';
+        el.className = 'card-text';
+      }
+      currentTranslations[lang]?.classList.remove('updating');
+    });
+
+    setStatus('完了 / Done', 'ok');
+    setTimeout(() => setStatus('待機中 / Ready'), 2000);
+  } catch (err) {
+    console.error(err);
+    setStatus(`エラー / Error: ${err.message}`, 'error');
+    targetLangs.forEach(lang => {
+      const el = $(`cardtext-${lang}`);
+      if (el) { el.textContent = 'エラー'; el.className = 'card-text'; }
+    });
+  } finally {
+    $('transIndicator').classList.remove('active');
+  }
+}
+
+// ── Recording controls ────────────────────────────────────────
+function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+function startRecording() {
+  if (!recognition && !initSpeechRecognition()) return;
+  isRecording = true;
+  updateBtn(true);
+  try {
+    recognition.lang = LANGUAGES[$('sourceLang').value].speechCode;
+    recognition.start();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function stopRecording() {
+  isRecording = false;
+  updateBtn(false);
+  try { recognition?.stop(); } catch {}
+  if (interimDiv) { interimDiv.remove(); interimDiv = null; }
+}
+
+function updateBtn(recording) {
+  const btn = $('recordBtn');
+  const txt = $('recordBtnText');
+  if (recording) {
+    btn.className = 'record-btn recording';
+    btn.innerHTML = '<span class="dot"></span><span id="recordBtnText">録音停止</span>';
+  } else {
+    btn.className = 'record-btn idle';
+    btn.innerHTML = '<span class="mic-icon">🎙️</span><span id="recordBtnText">録音開始</span>';
+  }
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────
+async function init() {
+  updateTranslationCards();
+  initSpeechRecognition();
+
+  // Check server health
+  try {
+    const r = await fetch('/api/health');
+    const data = await r.json();
+    if (!data.hasApiKey) {
+      setStatus('⚠️ ANTHROPIC_API_KEY が設定されていません', 'error');
+    } else {
+      setStatus('準備完了 / Ready', 'ok');
+      setTimeout(() => setStatus('待機中 / Waiting...'), 3000);
+    }
+  } catch {
+    setStatus('サーバーに接続できません / Cannot connect to server', 'error');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
