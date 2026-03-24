@@ -361,14 +361,144 @@
       font-size: 0.88rem;
       line-height: 1.5;
     }
+
+    /* ── Setup overlay ── */
+    .setup-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+    .setup-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      max-width: 520px;
+      width: 100%;
+    }
+    .setup-card h2 {
+      font-size: 1.3rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .setup-card p {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      margin-bottom: 1.5rem;
+      line-height: 1.6;
+    }
+    .setup-steps {
+      list-style: none;
+      margin-bottom: 1.5rem;
+    }
+    .setup-steps li {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      margin-bottom: 0.9rem;
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+    .setup-steps .num {
+      min-width: 22px; height: 22px;
+      background: var(--accent);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.72rem; font-weight: 700;
+      margin-top: 1px;
+    }
+    .setup-steps a {
+      color: #a09aff;
+      text-decoration: none;
+    }
+    .setup-steps a:hover { text-decoration: underline; }
+    .setup-steps code {
+      background: var(--surface2);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.85em;
+      color: var(--accent3);
+    }
+    .setup-free-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      background: rgba(67, 233, 123, 0.1);
+      border: 1px solid rgba(67, 233, 123, 0.3);
+      color: var(--accent3);
+      padding: 0.25rem 0.7rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+    .setup-dismiss {
+      width: 100%;
+      padding: 0.7rem;
+      background: linear-gradient(135deg, var(--accent), #9c85ff);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .setup-dismiss:hover { opacity: 0.9; }
   </style>
 </head>
 <body>
 
+<!-- Setup overlay (shown when API key is missing) -->
+<div class="setup-overlay" id="setupOverlay" style="display:none">
+  <div class="setup-card">
+    <div class="setup-free-badge">✓ 完全無料 / Completely Free</div>
+    <h2>⚡ Hyper Babel のセットアップ</h2>
+    <p>Google AI Studio の無料 API キーが必要です。クレジットカード不要、数分で取得できます。</p>
+    <ol class="setup-steps">
+      <li>
+        <span class="num">1</span>
+        <span><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">
+          aistudio.google.com/apikey
+        </a> を開く</span>
+      </li>
+      <li>
+        <span class="num">2</span>
+        <span>「API キーを作成」をクリック → プロジェクトを選択</span>
+      </li>
+      <li>
+        <span class="num">3</span>
+        <span>キーをコピーして <code>.env</code> ファイルに貼り付け：<br>
+          <code>GOOGLE_API_KEY=AIza...</code>
+        </span>
+      </li>
+      <li>
+        <span class="num">4</span>
+        <span>サーバーを再起動 → <code>npm start</code></span>
+      </li>
+    </ol>
+    <p style="font-size:0.78rem; margin-bottom:1rem">
+      無料枠：1,500 リクエスト/日 · 15 RPM · 1M トークン/分<br>
+      モデル：Gemini 2.0 Flash（Google DeepMind）
+    </p>
+    <button class="setup-dismiss" onclick="document.getElementById('setupOverlay').style.display='none'">
+      設定済み — アプリを開く
+    </button>
+  </div>
+</div>
+
 <header>
   <div>
     <div class="logo">⚡ Hyper Babel</div>
-    <div class="subtitle">リアルタイム音声翻訳 / Real-time Voice Translation</div>
+    <div class="subtitle">リアルタイム音声翻訳 · Powered by Gemini 2.0 Flash (Free)</div>
   </div>
 </header>
 
@@ -876,9 +1006,10 @@ async function init() {
     const r = await fetch('/api/health');
     const data = await r.json();
     if (!data.hasApiKey) {
-      setStatus('⚠️ ANTHROPIC_API_KEY が設定されていません', 'error');
+      $('setupOverlay').style.display = 'flex';
+      setStatus('⚠️ GOOGLE_API_KEY が未設定です', 'error');
     } else {
-      setStatus('準備完了 / Ready', 'ok');
+      setStatus(`準備完了 / Ready  (${data.model})`, 'ok');
       setTimeout(() => setStatus('待機中 / Waiting...'), 3000);
     }
   } catch {

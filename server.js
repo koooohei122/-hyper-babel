@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import express from "express";
 import { createServer } from "http";
 import path from "path";
@@ -12,131 +12,124 @@ const server = createServer(app);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
 const LANGUAGES = {
-  ja: "日本語",
+  ja: "日本語 (Japanese)",
   en: "English",
-  ar: "العربية",
-  hi: "हिंदी",
-  pt: "Português",
-  zh: "中文",
-  fr: "Français",
-  it: "Italiano",
-  ko: "한국어",
+  ar: "العربية (Arabic)",
+  hi: "हिंदी (Hindi)",
+  pt: "Português (Portuguese)",
+  zh: "中文 (Chinese)",
+  fr: "Français (French)",
+  it: "Italiano (Italian)",
+  ko: "한국어 (Korean)",
 };
 
-// POST /api/translate — streaming translation via SSE
+// Build Gemini client lazily so missing key gives a clear error at request time
+function getModel() {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error("GOOGLE_API_KEY is not set");
+  const genAI = new GoogleGenerativeAI(apiKey);
+  return genAI.getGenerativeModel({
+    model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+    generationConfig: {
+      temperature: 0.1,       // Low temperature → consistent, accurate translations
+      maxOutputTokens: 2048,
+    },
+    systemInstruction: `You are a professional simultaneous interpreter.
+When given text and a list of target languages, return ONLY a single JSON object mapping
+language codes to their translations. No markdown, no explanation, no extra text.
+Example: {"en":"Hello","fr":"Bonjour","ja":"こんにちは"}`,
+  });
+}
+
+// POST /api/translate  — streams translations via SSE
 app.post("/api/translate", async (req, res) => {
   const { text, sourceLang, targetLangs } = req.body;
 
-  if (!text || !sourceLang || !targetLangs || targetLangs.length === 0) {
+  if (!text?.trim() || !sourceLang || !targetLangs?.length) {
     return res.status(400).json({ error: "Missing required fields" });
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: "ANTHROPIC_API_KEY is not set" });
   }
 
   // Set up SSE
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
 
-  const sendEvent = (event, data) => {
+  const send = (event, data) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
 
-  const targetList = targetLangs
-    .filter((lang) => lang !== sourceLang)
-    .map((lang) => `- ${LANGUAGES[lang]} (${lang})`)
+  const targets = targetLangs.filter((l) => l !== sourceLang);
+  if (targets.length === 0) { send("done", {}); res.end(); return; }
+
+  const targetList = targets
+    .map((l) => `- ${LANGUAGES[l]} → key: "${l}"`)
     .join("\n");
 
-  if (!targetList) {
-    sendEvent("done", {});
-    res.end();
-    return;
-  }
+  const prompt = `Translate the following ${LANGUAGES[sourceLang]} text into ALL languages listed below.
+Respond with ONLY a JSON object using the exact key names shown.
 
-  const systemPrompt = `You are a professional simultaneous interpreter.
-Translate the given text from ${LANGUAGES[sourceLang]} into ALL of the following languages.
-
-Output ONLY a JSON object with language codes as keys and translations as values.
-Do not include any explanation, markdown formatting, or extra text.
-Example format: {"en":"Hello","fr":"Bonjour","ja":"こんにちは"}`;
-
-  const userPrompt = `Translate this text from ${LANGUAGES[sourceLang]}:
+Text to translate:
 "${text}"
 
 Target languages:
-${targetList}
-
-Respond with ONLY the JSON object.`;
+${targetList}`;
 
   try {
+    const model = getModel();
+    const result = await model.generateContentStream(prompt);
+
     let buffer = "";
+    const sent = new Set();
 
-    const stream = client.messages.stream({
-      model: "claude-opus-4-6",
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-    });
+    for await (const chunk of result.stream) {
+      const piece = chunk.text();
+      if (!piece) continue;
+      buffer += piece;
 
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        buffer += event.delta.text;
-
-        // Try to parse partial JSON as it streams in
-        // Send incremental updates when we find complete key-value pairs
-        const partialMatches = buffer.matchAll(/"([a-z]{2})"\s*:\s*"([^"]+)"/g);
-        for (const match of partialMatches) {
-          const [, langCode, translation] = match;
-          if (targetLangs.includes(langCode) && langCode !== sourceLang) {
-            sendEvent("translation", { lang: langCode, text: translation });
-          }
+      // Stream partial translations as soon as we see complete key:"value" pairs
+      for (const match of buffer.matchAll(/"([a-z]{2})"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+        const [, lang, translation] = match;
+        if (targets.includes(lang) && !sent.has(lang)) {
+          sent.add(lang);
+          send("translation", { lang, text: translation.replace(/\\"/g, '"') });
         }
       }
     }
 
-    // Final parse to ensure all translations are sent
+    // Final pass — parse the full JSON to catch anything missed
     try {
-      const cleaned = buffer.trim().replace(/^```json\n?/, "").replace(/\n?```$/, "");
-      const translations = JSON.parse(cleaned);
-      sendEvent("final", { translations });
+      const clean = buffer.trim().replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+      const all = JSON.parse(clean);
+      send("final", { translations: all });
     } catch {
-      // If JSON parse fails, the partial events already sent are sufficient
+      // Partial events already cover the content
     }
 
-    sendEvent("done", {});
+    send("done", {});
     res.end();
-  } catch (error) {
-    console.error("Translation error:", error);
-    sendEvent("error", {
-      message: error.message || "Translation failed",
-    });
+  } catch (err) {
+    console.error("Translation error:", err.message);
+    send("error", { message: err.message });
     res.end();
   }
 });
 
 // Health check
-app.get("/api/health", (req, res) => {
+app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
-    hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+    hasApiKey: !!process.env.GOOGLE_API_KEY,
+    model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`\nVoice Translation App running at http://localhost:${PORT}`);
+  console.log(`\n⚡ Hyper Babel  →  http://localhost:${PORT}`);
   console.log(
-    `API Key: ${process.env.ANTHROPIC_API_KEY ? "✓ Set" : "✗ Not set (set ANTHROPIC_API_KEY)"}`
+    `   Gemini model : ${process.env.GEMINI_MODEL || "gemini-2.0-flash"}`
+  );
+  console.log(
+    `   API key      : ${process.env.GOOGLE_API_KEY ? "✓ set" : "✗ missing  →  set GOOGLE_API_KEY in .env"}`
   );
 });
