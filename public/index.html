@@ -498,7 +498,7 @@
 <header>
   <div>
     <div class="logo">⚡ Hyper Babel</div>
-    <div class="subtitle">リアルタイム音声翻訳 · Powered by Gemini 2.0 Flash (Free)</div>
+    <div class="subtitle">リアルタイム音声翻訳 · local / Ollama / Gemini</div>
   </div>
 </header>
 
@@ -1005,12 +1005,19 @@ async function init() {
   try {
     const r = await fetch('/api/health');
     const data = await r.json();
-    if (!data.hasApiKey) {
+
+    const backendLabel = {
+      local:  `NLLB-200 (offline · ${data.dtype ?? 'q8'})`,
+      ollama: `Ollama · ${data.model}`,
+      gemini: `Gemini · ${data.model}`,
+    }[data.backend] ?? data.backend;
+
+    if (data.backend === 'gemini' && !data.hasApiKey) {
       $('setupOverlay').style.display = 'flex';
       setStatus('⚠️ GOOGLE_API_KEY が未設定です', 'error');
     } else {
-      setStatus(`準備完了 / Ready  (${data.model})`, 'ok');
-      setTimeout(() => setStatus('待機中 / Waiting...'), 3000);
+      setStatus(`準備完了 — ${backendLabel}`, 'ok');
+      setTimeout(() => setStatus(`待機中 / Waiting  [${backendLabel}]`), 3000);
     }
   } catch {
     setStatus('サーバーに接続できません / Cannot connect to server', 'error');
