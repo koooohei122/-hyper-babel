@@ -42,8 +42,11 @@ app.post("/api/translate", async (req, res) => {
   const send = (event, data) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
+  // API key may come from browser (Gemini browser-key mode)
+  const browserApiKey = req.headers["x-gemini-key"] || "";
+
   try {
-    await backendModule.translate(text, sourceLang, targetLangs, send);
+    await backendModule.translate(text, sourceLang, targetLangs, send, { apiKey: browserApiKey });
     send("done", {});
   } catch (err) {
     console.error("Translation error:", err.message);
@@ -61,8 +64,8 @@ app.get("/api/health", (_req, res) => {
 
   switch (BACKEND) {
     case "gemini":
-      info.hasApiKey = !!process.env.GOOGLE_API_KEY;
-      info.model     = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+      info.model          = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+      info.browserKeyMode = !process.env.GOOGLE_API_KEY;  // true → key comes from browser
       break;
     case "ollama":
       info.ollamaUrl = process.env.OLLAMA_URL  || "http://localhost:11434";

@@ -453,44 +453,91 @@
       transition: opacity 0.15s;
     }
     .setup-dismiss:hover { opacity: 0.9; }
+
+    /* ── API Key input ── */
+    .key-input-wrap {
+      position: relative;
+      margin-bottom: 1rem;
+    }
+    .key-input-wrap input {
+      width: 100%;
+      padding: 0.65rem 2.5rem 0.65rem 0.75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.88rem;
+      font-family: monospace;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .key-input-wrap input:focus { border-color: var(--accent); }
+    .key-input-wrap input.error { border-color: var(--recording); }
+    .key-toggle {
+      position: absolute;
+      right: 0.6rem; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      cursor: pointer; font-size: 1rem;
+      color: var(--text-dim);
+      padding: 0.2rem;
+    }
+    .key-error-msg {
+      font-size: 0.75rem;
+      color: var(--recording);
+      margin-top: 0.3rem;
+      display: none;
+    }
+
+    /* ── Header key button ── */
+    .header-key-btn {
+      margin-left: auto;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-dim);
+      padding: 0.4rem 0.8rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .header-key-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .header-key-btn.has-key { color: var(--accent3); border-color: rgba(67,233,123,0.3); }
   </style>
 </head>
 <body>
 
-<!-- Setup overlay (shown when API key is missing) -->
+<!-- API Key overlay -->
 <div class="setup-overlay" id="setupOverlay" style="display:none">
   <div class="setup-card">
-    <div class="setup-free-badge">✓ 完全無料 / Completely Free</div>
-    <h2>⚡ Hyper Babel のセットアップ</h2>
-    <p>Google AI Studio の無料 API キーが必要です。クレジットカード不要、数分で取得できます。</p>
-    <ol class="setup-steps">
-      <li>
-        <span class="num">1</span>
-        <span><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">
-          aistudio.google.com/apikey
-        </a> を開く</span>
-      </li>
-      <li>
-        <span class="num">2</span>
-        <span>「API キーを作成」をクリック → プロジェクトを選択</span>
-      </li>
-      <li>
-        <span class="num">3</span>
-        <span>キーをコピーして <code>.env</code> ファイルに貼り付け：<br>
-          <code>GOOGLE_API_KEY=AIza...</code>
-        </span>
-      </li>
-      <li>
-        <span class="num">4</span>
-        <span>サーバーを再起動 → <code>npm start</code></span>
-      </li>
-    </ol>
-    <p style="font-size:0.78rem; margin-bottom:1rem">
-      無料枠：1,500 リクエスト/日 · 15 RPM · 1M トークン/分<br>
-      モデル：Gemini 2.0 Flash（Google DeepMind）
+    <div class="setup-free-badge">🔒 このブラウザにのみ保存</div>
+    <h2>🔑 Gemini API キー</h2>
+    <p>キーはこのブラウザの <code>localStorage</code> に保存されます。<br>
+      サーバーには翻訳リクエストのヘッダーとして毎回送信されます。</p>
+
+    <div class="key-input-wrap">
+      <input type="password" id="apiKeyInput" placeholder="AIza..."
+        onkeydown="if(event.key==='Enter') saveApiKey()">
+      <button class="key-toggle" onclick="toggleKeyVisibility()" title="表示/非表示">👁</button>
+    </div>
+    <div class="key-error-msg" id="keyErrorMsg">有効なキーを入力してください（AIza で始まる文字列）</div>
+
+    <p style="font-size:0.78rem; margin-bottom:1.2rem; color:var(--text-dim); line-height:1.7">
+      無料キー取得 →
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">
+        aistudio.google.com/apikey
+      </a><br>
+      無料枠：1,500 リクエスト/日 · クレジットカード不要
     </p>
-    <button class="setup-dismiss" onclick="document.getElementById('setupOverlay').style.display='none'">
-      設定済み — アプリを開く
+
+    <button class="setup-dismiss" onclick="saveApiKey()">
+      保存して開始 / Save &amp; Start
     </button>
   </div>
 </div>
@@ -498,8 +545,11 @@
 <header>
   <div>
     <div class="logo">⚡ Hyper Babel</div>
-    <div class="subtitle">リアルタイム音声翻訳 · local / Ollama / Gemini</div>
+    <div class="subtitle">リアルタイム音声翻訳 · Gemini 2.0 Flash</div>
   </div>
+  <button class="header-key-btn" id="headerKeyBtn" onclick="openKeyDialog()">
+    🔑 <span id="headerKeyLabel">APIキー未設定</span>
+  </button>
 </header>
 
 <main>
@@ -852,9 +902,15 @@ async function translateText(text) {
   $('transIndicator').classList.add('active');
 
   try {
+    const apiKey = getApiKey();
+    if (!apiKey) { openKeyDialog(); return; }
+
     const response = await fetch('/api/translate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Gemini-Key': apiKey,
+      },
       body: JSON.stringify({ text, sourceLang, targetLangs }),
     });
 
@@ -996,31 +1052,69 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ── API Key management ────────────────────────────────────────
+const STORAGE_KEY = 'gemini_api_key';
+
+function getApiKey() {
+  return localStorage.getItem(STORAGE_KEY) || '';
+}
+
+function openKeyDialog() {
+  const existing = getApiKey();
+  const input = $('apiKeyInput');
+  input.value = existing;
+  input.type = 'password';
+  $('keyErrorMsg').style.display = 'none';
+  input.classList.remove('error');
+  $('setupOverlay').style.display = 'flex';
+  setTimeout(() => input.focus(), 80);
+}
+
+function toggleKeyVisibility() {
+  const input = $('apiKeyInput');
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function saveApiKey() {
+  const key = $('apiKeyInput').value.trim();
+  if (!key.startsWith('AIza') || key.length < 30) {
+    $('apiKeyInput').classList.add('error');
+    $('keyErrorMsg').style.display = 'block';
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, key);
+  $('setupOverlay').style.display = 'none';
+  updateHeaderKeyBtn(true);
+  setStatus('準備完了 — Gemini 2.0 Flash', 'ok');
+  setTimeout(() => setStatus('待機中 / Waiting'), 3000);
+}
+
+function updateHeaderKeyBtn(hasKey) {
+  const btn = $('headerKeyBtn');
+  const lbl = $('headerKeyLabel');
+  if (hasKey) {
+    btn.classList.add('has-key');
+    lbl.textContent = 'APIキー設定済み';
+  } else {
+    btn.classList.remove('has-key');
+    lbl.textContent = 'APIキー未設定';
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────
-async function init() {
+function init() {
   updateTranslationCards();
   initSpeechRecognition();
 
-  // Check server health
-  try {
-    const r = await fetch('/api/health');
-    const data = await r.json();
+  const key = getApiKey();
+  updateHeaderKeyBtn(!!key);
 
-    const backendLabel = {
-      local:  `NLLB-200 (offline · ${data.dtype ?? 'q8'})`,
-      ollama: `Ollama · ${data.model}`,
-      gemini: `Gemini · ${data.model}`,
-    }[data.backend] ?? data.backend;
-
-    if (data.backend === 'gemini' && !data.hasApiKey) {
-      $('setupOverlay').style.display = 'flex';
-      setStatus('⚠️ GOOGLE_API_KEY が未設定です', 'error');
-    } else {
-      setStatus(`準備完了 — ${backendLabel}`, 'ok');
-      setTimeout(() => setStatus(`待機中 / Waiting  [${backendLabel}]`), 3000);
-    }
-  } catch {
-    setStatus('サーバーに接続できません / Cannot connect to server', 'error');
+  if (!key) {
+    $('setupOverlay').style.display = 'flex';
+    setStatus('APIキーを設定してください', 'error');
+  } else {
+    setStatus('準備完了 — Gemini 2.0 Flash', 'ok');
+    setTimeout(() => setStatus('待機中 / Waiting'), 3000);
   }
 }
 

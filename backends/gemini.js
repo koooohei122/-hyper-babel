@@ -21,25 +21,12 @@ const LANG_NAME = {
   ko: "한국어 (Korean)",
 };
 
-function getModel() {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) throw new Error("GOOGLE_API_KEY is not set");
-  const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({
-    model: MODEL,
-    generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
-    systemInstruction:
-      "You are a professional simultaneous interpreter. " +
-      "Respond ONLY with a JSON object mapping language codes to translations. " +
-      'No markdown, no explanation. Example: {"en":"Hello","fr":"Bonjour"}',
-  });
-}
 
 export async function init() {
-  if (!process.env.GOOGLE_API_KEY) {
-    console.warn("  ⚠  GOOGLE_API_KEY not set — Gemini backend unavailable");
+  if (process.env.GOOGLE_API_KEY) {
+    console.log(`  Gemini OK — model: ${MODEL} (server env key)`);
   } else {
-    console.log(`  Gemini OK — model: ${MODEL}`);
+    console.log(`  Gemini — API key will be provided by the browser`);
   }
 }
 
@@ -48,8 +35,13 @@ export async function init() {
  * @param {string}   sourceLang
  * @param {string[]} targetLangs
  * @param {Function} sendEvent
+ * @param {object}   [opts]
+ * @param {string}   [opts.apiKey]  — key from browser (overrides env)
  */
-export async function translate(text, sourceLang, targetLangs, sendEvent) {
+export async function translate(text, sourceLang, targetLangs, sendEvent, opts = {}) {
+  const apiKey = opts.apiKey || process.env.GOOGLE_API_KEY;
+  if (!apiKey) throw new Error("Gemini API key not provided");
+
   const targets = targetLangs.filter((l) => l !== sourceLang);
   if (targets.length === 0) return;
 
@@ -63,7 +55,15 @@ export async function translate(text, sourceLang, targetLangs, sendEvent) {
     `Target languages:\n${targetList}\n\n` +
     "Respond with ONLY the JSON object.";
 
-  const model  = getModel();
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: MODEL,
+    generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
+    systemInstruction:
+      "You are a professional simultaneous interpreter. " +
+      "Respond ONLY with a JSON object mapping language codes to translations. " +
+      'No markdown, no explanation. Example: {"en":"Hello","fr":"Bonjour"}',
+  });
   const result = await model.generateContentStream(prompt);
 
   let buffer = "";
