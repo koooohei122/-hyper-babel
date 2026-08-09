@@ -519,7 +519,7 @@
     <div class="setup-free-badge">🔒 このブラウザにのみ保存</div>
     <h2>🔑 Gemini API キー</h2>
     <p>キーはこのブラウザの <code>localStorage</code> に保存されます。<br>
-      サーバーには翻訳リクエストのヘッダーとして毎回送信されます。</p>
+      翻訳リクエストはブラウザから Gemini API へ直接送信されます。</p>
 
     <div class="key-input-wrap">
       <input type="password" id="apiKeyInput" placeholder="AIza..."
@@ -920,11 +920,11 @@ async function translateText(text) {
       `"${text}"\n\nTarget languages:\n${targetList}\n\nRespond with ONLY the JSON object.`;
 
     const MODEL = 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         systemInstruction: {
